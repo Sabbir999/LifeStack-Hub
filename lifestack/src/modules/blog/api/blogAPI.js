@@ -7,21 +7,22 @@ import {
   push,
   onValue,
   off,
-  query,
-  orderByChild,
-  equalTo,
 } from "firebase/database";
 
 import { db } from "../../../firebase-config";
 import { DB_PATHS } from "../../../services/paths";
 
 const BLOG_KEY = DB_PATHS.BLOG || "blogPosts";
+const SHARED_BLOG_KEY = "sharedBlogPosts";
 const now = () => Date.now();
 
 const getPostsPath = (userId) => `${DB_PATHS.USERS}/${userId}/${BLOG_KEY}`;
 
 const getPostPath = (userId, postId) =>
   `${getPostsPath(userId)}/${postId}`;
+
+const getSharedBlogPostPath = (shareId) =>
+  `${SHARED_BLOG_KEY}/${shareId}`;
 
 const listenToRef = (pathRef, callback, errorMessage) => {
   const unsubscribe = onValue(
@@ -79,7 +80,6 @@ const normalizePost = (postData = {}) => {
     visibility,
     featured: Boolean(postData.featured),
 
-    // Author info
     authorName: postData.authorName?.trim() || "",
     authorTitle: postData.authorTitle?.trim() || "",
     authorBio: postData.authorBio?.trim() || "",
@@ -87,9 +87,43 @@ const normalizePost = (postData = {}) => {
   };
 };
 
+const shouldCreatePublicSharedPost = (post) => {
+  return (
+    post.status === "published" &&
+    (post.visibility === "public" || post.visibility === "unlisted")
+  );
+};
+
+const syncSharedBlogPost = async (post) => {
+  if (!post.shareId) {
+    return;
+  }
+
+  const sharedRef = ref(db, getSharedBlogPostPath(post.shareId));
+
+  try {
+    if (!shouldCreatePublicSharedPost(post)) {
+      await remove(sharedRef);
+      return;
+    }
+
+    await set(sharedRef, {
+      ...post,
+      sharedAt: now(),
+    });
+  } catch (error) {
+    console.error("Shared blog sync failed:", error);
+  }
+};
+
 export const blogAPI = {
   createPost: async (userId, postData) => {
     const postId = push(ref(db, getPostsPath(userId))).key;
+
+    if (!postId) {
+      throw new Error("Unable to create blog post id.");
+    }
+
     const normalizedPost = normalizePost(postData);
 
     const postWithId = {
@@ -103,6 +137,7 @@ export const blogAPI = {
     };
 
     await set(ref(db, getPostPath(userId, postId)), postWithId);
+    await syncSharedBlogPost(postWithId);
 
     return postWithId;
   },
@@ -114,8 +149,7 @@ export const blogAPI = {
       "Blog posts listener error:"
     ),
 
-  getPost: (userId, postId) =>
-    get(ref(db, getPostPath(userId, postId))),
+  getPost: (userId, postId) => get(ref(db, getPostPath(userId, postId))),
 
   updatePost: async (userId, postId, updates) => {
     const postRef = ref(db, getPostPath(userId, postId));
@@ -132,57 +166,80 @@ export const blogAPI = {
         ? existingPost.publishedAt || now()
         : updates.publishedAt ?? existingPost.publishedAt ?? null;
 
-    await update(postRef, {
+    const updatedPost = {
       ...normalizedPost,
+      id: existingPost.id || postId,
       shareId: existingPost.shareId || createShareId(),
       createdBy: existingPost.createdBy || userId,
       createdAt: existingPost.createdAt || now(),
       updatedAt: now(),
       publishedAt: nextPublishedAt,
-    });
+    };
+
+    await update(postRef, updatedPost);
+    await syncSharedBlogPost(updatedPost);
 
     return postId;
   },
 
   deletePost: async (userId, postId) => {
-    await remove(ref(db, getPostPath(userId, postId)));
+    const postRef = ref(db, getPostPath(userId, postId));
+    const snapshot = await get(postRef);
+    const existingPost = snapshot.val();
+
+    if (existingPost?.shareId) {
+      await remove(ref(db, getSharedBlogPostPath(existingPost.shareId)));
+    }
+
+    await remove(postRef);
 
     return postId;
   },
 
   publishPost: async (userId, postId) => {
-    await update(ref(db, getPostPath(userId, postId)), {
+    const postRef = ref(db, getPostPath(userId, postId));
+    const snapshot = await get(postRef);
+    const existingPost = snapshot.val() || {};
+
+    const updatedPost = {
+      ...existingPost,
+      id: existingPost.id || postId,
+      shareId: existingPost.shareId || createShareId(),
       status: "published",
       visibility: "public",
-      publishedAt: now(),
+      publishedAt: existingPost.publishedAt || now(),
       updatedAt: now(),
-    });
+    };
+
+    await update(postRef, updatedPost);
+    await syncSharedBlogPost(updatedPost);
 
     return postId;
   },
 
   unpublishPost: async (userId, postId) => {
-    await update(ref(db, getPostPath(userId, postId)), {
+    const postRef = ref(db, getPostPath(userId, postId));
+    const snapshot = await get(postRef);
+    const existingPost = snapshot.val() || {};
+
+    const updatedPost = {
+      ...existingPost,
       status: "draft",
       visibility: "private",
       updatedAt: now(),
-    });
+    };
+
+    await update(postRef, updatedPost);
+
+    if (existingPost.shareId) {
+      await remove(ref(db, getSharedBlogPostPath(existingPost.shareId)));
+    }
 
     return postId;
   },
 
-  getSharedPostByShareId: (userId, shareId, callback) => {
-    const postsQuery = query(
-      ref(db, getPostsPath(userId)),
-      orderByChild("shareId"),
-      equalTo(shareId)
-    );
-
-    return listenToRef(
-      postsQuery,
-      callback,
-      "Shared blog post listener error:"
-    );
+  getSharedPostByShareIdOnce: async (shareId) => {
+    return get(ref(db, getSharedBlogPostPath(shareId)));
   },
 };
 

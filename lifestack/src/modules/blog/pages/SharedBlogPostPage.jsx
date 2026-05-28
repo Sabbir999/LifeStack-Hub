@@ -4,19 +4,6 @@ import DOMPurify from "dompurify";
 
 import { blogAPI } from "../api/blogAPI";
 
-const snapshotToArray = (snapshot) => {
-  const data = snapshot.val();
-
-  if (!data) {
-    return [];
-  }
-
-  return Object.keys(data).map((key) => ({
-    ...data[key],
-    id: data[key].id || key,
-  }));
-};
-
 const formatDate = (timestamp) => {
   if (!timestamp) {
     return "";
@@ -34,41 +21,67 @@ export default function SharedBlogPostPage() {
 
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [coverImageError, setCoverImageError] = useState(false);
 
   useEffect(() => {
     if (!userId || !shareId) {
       setLoading(false);
-      return undefined;
+      setLoadError("Invalid share link.");
+      return;
     }
 
     setLoading(true);
+    setLoadError("");
 
-    const unsubscribe = blogAPI.getSharedPostByShareId(
-      userId,
-      shareId,
-      (snapshot) => {
-        const matches = snapshotToArray(snapshot);
+    blogAPI
+      .getSharedPostByShareIdOnce(shareId)
+      .then((snapshot) => {
+        const sharedPost = snapshot.val();
 
-        const sharedPost = matches.find(
-          (item) =>
-            item.shareId === shareId &&
-            item.status === "published" &&
-            (item.visibility === "public" || item.visibility === "unlisted")
+        if (
+          sharedPost &&
+          sharedPost.shareId === shareId &&
+          sharedPost.status === "published" &&
+          (sharedPost.visibility === "public" ||
+            sharedPost.visibility === "unlisted")
+        ) {
+          setPost(sharedPost);
+          return;
+        }
+
+        setPost(null);
+      })
+      .catch((error) => {
+        console.error("Shared blog load error:", error);
+
+        setLoadError(
+          "Could not load this post. Please try opening the link in your browser."
         );
-
-        setPost(sharedPost || null);
+      })
+      .finally(() => {
         setLoading(false);
-      }
-    );
-
-    return () => unsubscribe();
+      });
   }, [userId, shareId]);
 
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50 text-gray-500">
         Loading post...
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
+          <h1 className="text-2xl font-bold text-gray-900">
+            Unable to load post
+          </h1>
+
+          <p className="mt-2 text-gray-600">{loadError}</p>
+        </div>
       </div>
     );
   }
