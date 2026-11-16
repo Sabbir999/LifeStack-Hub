@@ -145,20 +145,6 @@ Open your browser and navigate to:
 * Navigate to **Realtime Database → Create Database**
 * Choose **Start in test mode** and select region
 
-### 4. Configure Security Rules
-
-```json
-{
-  "rules": {
-    "users": {
-      "$uid": {
-        ".read": "auth != null && auth.uid == $uid",
-        ".write": "auth != null && auth.uid == $uid"
-      }
-    }
-  }
-}
-```
 
 ### 5. Get Configuration
 
