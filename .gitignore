@@ -1,37 +1,34 @@
-# Logs
-team-budget/logs
-team-budget/*.log
-team-budget/npm-debug.log*
-team-budget/yarn-debug.log*
-team-budget/yarn-error.log*
-team-budget/pnpm-debug.log*
-team-budget/lerna-debug.log*
+# Dependencies
+node_modules/
+/lifestack/node_modules/
 
-# Dependency directories
-team-budget/node_modules
+# Build output and caches
+dist/
+dist-ssr/
+coverage/
+.vite/
+*.tsbuildinfo
 
-# Build outputs
-team-budget/dist
-team-budget/dist-ssr
-team-budget/build
+# Local environment variables
+.env
+.env.*
+/lifestack/.env
+*.local
+!.env.example
 
-# Local environment files
-team-budget/.env
-team-budget/.env.local
-team-budget/.env.*.local
+# Firebase CLI cache and logs
+.firebase/
+firebase-debug.log
+firebase-debug.*.log
 
-# Editor directories and files
-team-budget/.vscode/*
-!team-budget/.vscode/extensions.json
-team-budget/.idea
-team-budget/.DS_Store
-team-budget/*.suo
-team-budget/*.ntvs*
-team-budget/*.njsproj
-team-budget/*.sln
-team-budget/*.sw?
+# Package manager logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
-# Local runtime or test data
-team-budget/coverage
-team-budget/tmp
-team-budget/.cache
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

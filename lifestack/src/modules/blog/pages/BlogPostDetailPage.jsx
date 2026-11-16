@@ -123,7 +123,7 @@ export default function BlogPostDetailPage() {
             src={post.coverImageUrl}
             alt={post.title}
             onError={() => setCoverImageError(true)}
-            className="max-h-[360px] w-full object-cover"
+            className="mx-auto block h-auto max-h-[32rem] max-w-full object-contain"
           />
         )}
 
@@ -141,6 +141,10 @@ export default function BlogPostDetailPage() {
 
             <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-bold capitalize text-gray-700">
               {post.visibility}
+            </span>
+
+            <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-bold text-gray-700">
+              {(post.uniqueViewCount || 0).toLocaleString()} unique views
             </span>
           </div>
 
@@ -191,7 +195,13 @@ export default function BlogPostDetailPage() {
       </div>
 
       {showShare && (
-        <BlogShareModal post={post} onClose={() => setShowShare(false)} />
+        <BlogShareModal
+          post={post}
+          onClose={() => setShowShare(false)}
+          onVisibilitySaved={(visibility) =>
+            setPost((previous) => ({ ...previous, visibility }))
+          }
+        />
       )}
     </article>
   );

@@ -1,98 +1,79 @@
-import React, { useState } from "react";
+import React from "react";
 import { Link } from "react-router-dom";
 import { Edit, Eye, Share2, Trash2 } from "lucide-react";
 
-const coverClasses = {
+const coverColorClasses = {
   blue: "bg-blue-50 text-blue-600",
   green: "bg-green-50 text-green-600",
   amber: "bg-amber-50 text-amber-600",
   purple: "bg-purple-50 text-purple-600",
   rose: "bg-rose-50 text-rose-600",
-  gray: "bg-gray-50 text-gray-600",
+  gray: "bg-gray-100 text-gray-600",
 };
-
-const coverIcons = {
-  blue: "✍️",
-  green: "🌿",
-  amber: "✏️",
-  purple: "📘",
-  rose: "📝",
-  gray: "📰",
-};
-
-const statusClasses = {
-  published: "bg-green-50 text-green-700 border-green-200",
-  draft: "bg-amber-50 text-amber-700 border-amber-200",
-};
-
-function BlogCover({ post }) {
-  const [imageError, setImageError] = useState(false);
-
-  const coverColor = post.coverColor || "blue";
-  const coverClass = coverClasses[coverColor] || coverClasses.blue;
-  const coverIcon = coverIcons[coverColor] || coverIcons.blue;
-
-  const hasValidImage =
-    post.coverImageUrl &&
-    post.coverImageUrl.trim() &&
-    !imageError;
-
-  if (hasValidImage) {
-    return (
-      <img
-        src={post.coverImageUrl}
-        alt={post.title || "Blog cover"}
-        onError={() => setImageError(true)}
-        className="h-36 w-full object-cover"
-      />
-    );
-  }
-
-  return (
-    <div className={`flex h-36 items-center justify-center ${coverClass}`}>
-      <span className="text-4xl">{coverIcon}</span>
-    </div>
-  );
-}
 
 export default function BlogPostCard({ post, onShare, onDelete }) {
-  const status = post.status || "draft";
+  const coverClass =
+    coverColorClasses[post.coverColor] || coverColorClasses.blue;
+
+  const uniqueViews = Number(post.uniqueViewCount || 0);
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
-      <BlogCover post={post} />
+    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition hover:shadow-md">
+      {post.coverImageUrl ? (
+        <img
+          src={post.coverImageUrl}
+          alt={post.title || "Blog post cover"}
+          className="h-36 w-full bg-gray-50 object-contain"
+        />
+      ) : (
+        <div
+          className={`flex h-36 w-full items-center justify-center text-4xl ${coverClass}`}
+        >
+          📝
+        </div>
+      )}
 
       <div className="p-5">
         <div className="mb-3 flex flex-wrap gap-2">
           <span
-            className={`rounded-full border px-2.5 py-1 text-xs font-bold capitalize ${
-              statusClasses[status] || statusClasses.draft
+            className={`rounded-full px-3 py-1 text-xs font-bold capitalize ${
+              post.status === "published"
+                ? "bg-green-50 text-green-700"
+                : "bg-amber-50 text-amber-700"
             }`}
           >
-            {status}
+            {post.status || "draft"}
           </span>
 
           {post.category && (
-            <span className="rounded-full border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700">
+            <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700">
               {post.category}
             </span>
           )}
         </div>
 
-        <h3 className="line-clamp-2 text-lg font-bold text-gray-900">
+        <h3 className="line-clamp-2 text-xl font-bold text-gray-900">
           {post.title || "Untitled post"}
         </h3>
 
-        <p className="mt-2 line-clamp-3 text-sm text-gray-600">
+        <p className="mt-2 line-clamp-3 text-sm leading-6 text-gray-600">
           {post.excerpt || "No excerpt yet."}
         </p>
 
+        <div className="mt-4 flex items-center gap-2 text-sm font-semibold text-gray-500">
+          <Eye className="h-4 w-4" />
+          <span>
+            {uniqueViews.toLocaleString()}{" "}
+            {uniqueViews === 1 ? "unique view" : "unique views"}
+          </span>
+        </div>
+
         {post.tags?.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="mt-4 flex flex-wrap gap-2">
             {post.tags.slice(0, 3).map((tag) => (
               <span
                 key={tag}
-                className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600"
+                className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600"
               >
                 #{tag}
               </span>
@@ -136,6 +117,6 @@ export default function BlogPostCard({ post, onShare, onDelete }) {
           </button>
         </div>
       </div>
-    </article>
+    </div>
   );
 }

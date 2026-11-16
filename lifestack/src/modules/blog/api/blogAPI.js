@@ -1,12 +1,10 @@
 import {
   ref,
-  set,
   get,
   update,
-  remove,
   push,
   onValue,
-  off,
+  set,
 } from "firebase/database";
 
 import { db } from "../../../firebase-config";
@@ -14,6 +12,7 @@ import { DB_PATHS } from "../../../services/paths";
 
 const BLOG_KEY = DB_PATHS.BLOG || "blogPosts";
 const SHARED_BLOG_KEY = "sharedBlogPosts";
+const VIEWS_KEY = "blogPostViews";
 const now = () => Date.now();
 
 const getPostsPath = (userId) => `${DB_PATHS.USERS}/${userId}/${BLOG_KEY}`;
@@ -24,14 +23,41 @@ const getPostPath = (userId, postId) =>
 const getSharedBlogPostPath = (shareId) =>
   `${SHARED_BLOG_KEY}/${shareId}`;
 
+const getViewsPath = (userId, postId) => `${VIEWS_KEY}/${userId}/${postId}`;
+
+const withViewCount = (post, viewsSnapshot) => ({
+  ...post,
+  uniqueViewCount: Number(post.uniqueViewCount || 0) + (viewsSnapshot?.size ?? 0),
+});
+
+const getOrCreateVisitorId = () => {
+  const storageKey = "lifestack_blog_visitor_id";
+
+  try {
+    const existingVisitorId = localStorage.getItem(storageKey);
+
+    if (existingVisitorId) {
+      return existingVisitorId;
+    }
+
+    const visitorId = `visitor_${Date.now().toString(36)}_${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+
+    localStorage.setItem(storageKey, visitorId);
+
+    return visitorId;
+  } catch {
+    return null;
+  }
+};
+
 const listenToRef = (pathRef, callback, errorMessage) => {
-  const unsubscribe = onValue(
+  return onValue(
     pathRef,
     callback,
     (error) => console.error(errorMessage, error)
   );
-
-  return () => off(pathRef, "value", unsubscribe);
 };
 
 const slugify = (value = "") =>
@@ -74,7 +100,7 @@ const normalizePost = (postData = {}) => {
     content: postData.content || "",
     coverImageUrl: postData.coverImageUrl?.trim() || "",
     coverColor: postData.coverColor || "blue",
-    category: postData.category || "Update",
+    category: postData.category?.trim() || "Update",
     tags: normalizeTags(postData.tags),
     status,
     visibility,
@@ -84,6 +110,9 @@ const normalizePost = (postData = {}) => {
     authorTitle: postData.authorTitle?.trim() || "",
     authorBio: postData.authorBio?.trim() || "",
     authorImageUrl: postData.authorImageUrl?.trim() || "",
+
+    uniqueViewCount: Number(postData.uniqueViewCount || 0),
+    lastViewedAt: postData.lastViewedAt || null,
   };
 };
 
@@ -94,26 +123,24 @@ const shouldCreatePublicSharedPost = (post) => {
   );
 };
 
-const syncSharedBlogPost = async (post) => {
-  if (!post.shareId) {
-    return;
-  }
+const savePostAndSharedCopy = async (postPath, post, { creating = false } = {}) => {
+  const changes = creating
+    ? { [postPath]: post }
+    : Object.fromEntries(
+        Object.entries(post).map(([field, value]) => [`${postPath}/${field}`, value])
+      );
 
-  const sharedRef = ref(db, getSharedBlogPostPath(post.shareId));
-
-  try {
-    if (!shouldCreatePublicSharedPost(post)) {
-      await remove(sharedRef);
-      return;
+  if (shouldCreatePublicSharedPost(post)) {
+    const sharedPath = getSharedBlogPostPath(post.shareId);
+    for (const [field, value] of Object.entries({ ...post, sharedAt: now() })) {
+      changes[`${sharedPath}/${field}`] = value;
     }
-
-    await set(sharedRef, {
-      ...post,
-      sharedAt: now(),
-    });
-  } catch (error) {
-    console.error("Shared blog sync failed:", error);
+  } else if (!creating) {
+    changes[getSharedBlogPostPath(post.shareId)] = null;
   }
+
+  // Commit visibility and the anonymous copy together.
+  await update(ref(db), changes);
 };
 
 export const blogAPI = {
@@ -136,25 +163,63 @@ export const blogAPI = {
       publishedAt: normalizedPost.status === "published" ? now() : null,
     };
 
-    await set(ref(db, getPostPath(userId, postId)), postWithId);
-    await syncSharedBlogPost(postWithId);
+    await savePostAndSharedCopy(getPostPath(userId, postId), postWithId, {
+      creating: true,
+    });
 
     return postWithId;
   },
 
-  getPosts: (userId, callback) =>
-    listenToRef(
-      ref(db, getPostsPath(userId)),
-      callback,
-      "Blog posts listener error:"
-    ),
+  getPosts: (userId, callback) => {
+    let posts;
+    let views;
 
-  getPost: (userId, postId) => get(ref(db, getPostPath(userId, postId))),
+    const emit = () => {
+      if (!posts || !views) return;
+
+      const entries = Object.entries(posts.val() || {});
+      const data = Object.fromEntries(
+        entries.map(([postId, post]) => [postId, withViewCount(post, views.child(postId))])
+      );
+      callback({ val: () => posts.exists() ? data : null });
+    };
+
+    const stopPosts = listenToRef(ref(db, getPostsPath(userId)), (snapshot) => {
+      posts = snapshot;
+      emit();
+    }, "Blog posts listener error:");
+
+    const stopViews = onValue(ref(db, `${VIEWS_KEY}/${userId}`), (snapshot) => {
+      views = snapshot;
+      emit();
+    }, (error) => {
+      console.error("Blog views listener error:", error);
+      views = { child: () => null };
+      emit();
+    });
+
+    return () => {
+      stopPosts();
+      stopViews();
+    };
+  },
+
+  getPost: async (userId, postId) => {
+    const post = (await get(ref(db, getPostPath(userId, postId)))).val();
+    if (!post) return { val: () => null };
+
+    const views = await get(ref(db, getViewsPath(userId, postId)));
+    return { val: () => withViewCount(post, views) };
+  },
 
   updatePost: async (userId, postId, updates) => {
     const postRef = ref(db, getPostPath(userId, postId));
     const snapshot = await get(postRef);
-    const existingPost = snapshot.val() || {};
+    const existingPost = snapshot.val();
+
+    if (!existingPost) {
+      throw new Error("Blog post not found.");
+    }
 
     const normalizedPost = normalizePost({
       ...existingPost,
@@ -176,8 +241,7 @@ export const blogAPI = {
       publishedAt: nextPublishedAt,
     };
 
-    await update(postRef, updatedPost);
-    await syncSharedBlogPost(updatedPost);
+    await savePostAndSharedCopy(getPostPath(userId, postId), updatedPost);
 
     return postId;
   },
@@ -187,59 +251,75 @@ export const blogAPI = {
     const snapshot = await get(postRef);
     const existingPost = snapshot.val();
 
+    const changes = {
+      [getPostPath(userId, postId)]: null,
+      [getViewsPath(userId, postId)]: null,
+    };
     if (existingPost?.shareId) {
-      await remove(ref(db, getSharedBlogPostPath(existingPost.shareId)));
+      changes[getSharedBlogPostPath(existingPost.shareId)] = null;
     }
 
-    await remove(postRef);
-
+    await update(ref(db), changes);
     return postId;
   },
 
-  publishPost: async (userId, postId) => {
-    const postRef = ref(db, getPostPath(userId, postId));
-    const snapshot = await get(postRef);
-    const existingPost = snapshot.val() || {};
+  publishPost: (userId, postId) =>
+    blogAPI.updatePost(userId, postId, { status: "published", visibility: "public" }),
 
-    const updatedPost = {
-      ...existingPost,
-      id: existingPost.id || postId,
-      shareId: existingPost.shareId || createShareId(),
-      status: "published",
-      visibility: "public",
-      publishedAt: existingPost.publishedAt || now(),
-      updatedAt: now(),
-    };
+  unpublishPost: (userId, postId) =>
+    blogAPI.updatePost(userId, postId, { status: "draft", visibility: "private" }),
 
-    await update(postRef, updatedPost);
-    await syncSharedBlogPost(updatedPost);
+  recordUniqueSharedPostView: async (shareId, sharedPost) => {
+    const visitorId = getOrCreateVisitorId();
+    const viewsPath = getViewsPath(sharedPost.createdBy, sharedPost.id);
+    let visitorKey;
+    let writeError;
 
-    return postId;
-  },
+    if (visitorId && !Object.hasOwn(sharedPost.viewers || {}, visitorId)) {
+      const message = new TextEncoder().encode(JSON.stringify([shareId, visitorId]));
+      const digest = await crypto.subtle.digest("SHA-256", message);
+      visitorKey = Array.from(
+        new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")
+      ).join("");
 
-  unpublishPost: async (userId, postId) => {
-    const postRef = ref(db, getPostPath(userId, postId));
-    const snapshot = await get(postRef);
-    const existingPost = snapshot.val() || {};
-
-    const updatedPost = {
-      ...existingPost,
-      status: "draft",
-      visibility: "private",
-      updatedAt: now(),
-    };
-
-    await update(postRef, updatedPost);
-
-    if (existingPost.shareId) {
-      await remove(ref(db, getSharedBlogPostPath(existingPost.shareId)));
+      try {
+        await set(ref(db, `${viewsPath}/${visitorKey}`), true);
+      } catch (error) {
+        // A repeat visit cannot overwrite the marker. Check whether it exists.
+        writeError = error;
+      }
     }
 
-    return postId;
+    const views = await get(ref(db, viewsPath));
+    if (writeError && !views.hasChild(visitorKey)) throw writeError;
+
+    return { uniqueViewCount: withViewCount(sharedPost, views).uniqueViewCount };
   },
 
   getSharedPostByShareIdOnce: async (shareId) => {
-    return get(ref(db, getSharedBlogPostPath(shareId)));
+    const databaseURL = import.meta.env.VITE_FIREBASE_DATABASE_URL?.replace(
+      /\/$/,
+      ""
+    );
+
+    if (!databaseURL) {
+      throw new Error("Firebase database URL is missing.");
+    }
+
+    const response = await fetch(
+      `${databaseURL}/${getSharedBlogPostPath(shareId)}.json`,
+      { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Failed to load shared blog post: ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    return {
+      val: () => data,
+    };
   },
 };
 

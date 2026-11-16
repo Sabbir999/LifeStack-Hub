@@ -10,6 +10,7 @@ export default function BlogEditorPage() {
   const { currentUser } = useAuth();
   const isEditing = Boolean(postId);
   const [post, setPost] = useState(null);
+  const [savedCategories, setSavedCategories] = useState([]);
   const [loading, setLoading] = useState(isEditing);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -18,6 +19,17 @@ export default function BlogEditorPage() {
     if (!currentUser?.uid || !postId) { setLoading(false); return; }
     blogAPI.getPost(currentUser.uid, postId).then((snapshot) => { setPost(snapshot.val()); setLoading(false); });
   }, [currentUser?.uid, postId]);
+
+  useEffect(() => {
+    const userId = currentUser?.uid;
+    setSavedCategories([]);
+    if (!userId) return;
+
+    return blogAPI.getPosts(userId, (snapshot) => {
+      const posts = Object.values(snapshot.val() || {});
+      setSavedCategories(posts.map((entry) => entry.category).filter(Boolean));
+    });
+  }, [currentUser?.uid]);
 
   const handleSave = async (payload) => {
     if (!currentUser?.uid) { setError("You must be logged in."); return; }
@@ -39,7 +51,7 @@ export default function BlogEditorPage() {
     <div className="space-y-6">
       <Link to="/blog" className="text-sm font-semibold text-blue-600 hover:text-blue-700">← Back to blog</Link>
       {error && <div className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-600">{error}</div>}
-      <BlogPostForm initialPost={post} onSave={handleSave} onCancel={() => navigate("/blog")} saving={saving} />
+      <BlogPostForm initialPost={post} savedCategories={savedCategories} onSave={handleSave} onCancel={() => navigate("/blog")} saving={saving} />
     </div>
   );
 }

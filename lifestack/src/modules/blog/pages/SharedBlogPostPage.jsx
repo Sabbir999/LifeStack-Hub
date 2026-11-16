@@ -31,28 +31,49 @@ export default function SharedBlogPostPage() {
       return;
     }
 
+    let active = true;
+    setPost(null);
+    setCoverImageError(false);
     setLoading(true);
     setLoadError("");
 
     blogAPI
       .getSharedPostByShareIdOnce(shareId)
       .then((snapshot) => {
+        if (!active) return;
         const sharedPost = snapshot.val();
 
         if (
           sharedPost &&
           sharedPost.shareId === shareId &&
+          sharedPost.createdBy === userId &&
           sharedPost.status === "published" &&
           (sharedPost.visibility === "public" ||
             sharedPost.visibility === "unlisted")
         ) {
           setPost(sharedPost);
+
+          blogAPI
+            .recordUniqueSharedPostView(shareId, sharedPost)
+            .then((result) => {
+              if (active && result?.uniqueViewCount !== undefined) {
+                setPost((previousPost) => ({
+                  ...previousPost,
+                  uniqueViewCount: result.uniqueViewCount,
+                }));
+              }
+            })
+            .catch((error) => {
+              console.error("Could not record unique blog view:", error);
+            });
+
           return;
         }
 
         setPost(null);
       })
       .catch((error) => {
+        if (!active) return;
         console.error("Shared blog load error:", error);
 
         setLoadError(
@@ -60,8 +81,12 @@ export default function SharedBlogPostPage() {
         );
       })
       .finally(() => {
-        setLoading(false);
+        if (active) setLoading(false);
       });
+
+    return () => {
+      active = false;
+    };
   }, [userId, shareId]);
 
   if (loading) {
@@ -91,7 +116,7 @@ export default function SharedBlogPostPage() {
       <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
         <div className="rounded-2xl border border-gray-200 bg-white p-8 text-center shadow-sm">
           <h1 className="text-2xl font-bold text-gray-900">
-            Post not available
+            This post is private or unavailable
           </h1>
 
           <p className="mt-2 text-gray-600">
@@ -120,7 +145,7 @@ export default function SharedBlogPostPage() {
               src={post.coverImageUrl}
               alt={post.title}
               onError={() => setCoverImageError(true)}
-              className="max-h-[420px] w-full object-cover"
+              className="mx-auto block h-auto max-h-[32rem] max-w-full object-contain"
             />
           )}
 
@@ -137,6 +162,10 @@ export default function SharedBlogPostPage() {
                   {formatDate(post.publishedAt)}
                 </span>
               )}
+
+              <span className="rounded-full bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-600">
+                {(post.uniqueViewCount || 0).toLocaleString()} unique views
+              </span>
             </div>
 
             <h1 className="text-4xl font-bold text-gray-900">{post.title}</h1>

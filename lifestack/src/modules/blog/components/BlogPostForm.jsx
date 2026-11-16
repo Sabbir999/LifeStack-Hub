@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useId, useMemo, useState } from "react";
 import { Save, Send } from "lucide-react";
 
 import RichTextEditor from "./RichTextEditor";
@@ -27,11 +27,13 @@ const slugify = (value = "") =>
 
 export default function BlogPostForm({
   initialPost = null,
+  savedCategories = [],
   onSave,
   onCancel,
   saving = false,
 }) {
   const isEditing = Boolean(initialPost);
+  const categoryListId = useId();
 
   const [form, setForm] = useState({
     title: initialPost?.title || "",
@@ -68,10 +70,7 @@ export default function BlogPostForm({
     ...form,
     slug: generatedSlug,
     status: statusOverride || form.status,
-    visibility:
-      statusOverride === "published" && form.visibility === "private"
-        ? "public"
-        : form.visibility,
+    category: form.category.trim() || "Update",
   });
 
   return (
@@ -165,17 +164,18 @@ export default function BlogPostForm({
 
         <label className="block">
           <span className="text-sm font-semibold text-gray-700">Category</span>
-          <select
+          <input
+            list={categoryListId}
             value={form.category}
             onChange={(event) => updateField("category", event.target.value)}
             className="mt-1 w-full rounded-xl border border-gray-300 px-4 py-2.5"
-          >
-            {categories.map((category) => (
-              <option key={category} value={category}>
-                {category}
-              </option>
+            placeholder="Choose or type a category"
+          />
+          <datalist id={categoryListId}>
+            {[...new Set([...categories, ...savedCategories])].map((category) => (
+              <option key={category} value={category} />
             ))}
-          </select>
+          </datalist>
         </label>
 
         <label className="block">
